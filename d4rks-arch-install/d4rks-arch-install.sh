@@ -15,10 +15,13 @@ yes | pacman -Sy pacman-contrib dialog git make
 EMAIL='dhardin@hardinsolutions.net'
 FNAME='David'
 LNAME='Hardin'
-ai_hostname=$(dialog --stdout --clear --inputbox "Enter the hostname:" 8 38)
-ai_username=$(dialog --stdout --clear --inputbox "Enter your account name:" 8 38)
+#ai_hostname=$(dialog --stdout --clear --inputbox "Enter the hostname:" 8 38)
+#ai_username=$(dialog --stdout --clear --inputbox "Enter your account name:" 8 38)
 ai_password=$(dialog --stdout --clear --passwordbox "Enter your password:" 8 38)
 ai_password2=$(dialog --stdout --clear --passwordbox "Confirm your password:" 8 38)
+
+ai_hostname=dhardin-arch01a
+ai_username=dhardin
 
 if [[ ! $ai_password = $ai_password2 ]]; then
 	echo "Password did not match confirmation."
@@ -53,9 +56,45 @@ until ping -c1 "google.com" >/dev/null 2>&1; do :; done &
 trap "kill $!; ping_cancelled=1" SIGINT
 wait $!
 trap - SIGINT
-if [ $ping_cancelled -eq 1]; then
+if [ $ping_cancelled -eq 1 ]; then
 	echo "Ctrl+C Detected."
 	exit;
 fi
 
+cpu_arch=$(lscpu | grep Architecture | cut -d':' -f2 | sed 's/ *//g')
+if [[ $cpu_arch = "x86_64" ]]; then
+	mirrorlist_url="https://archlinux.org/mirrorlist/?country=US&protocol=https&ip_version=4&use_mirror_status=on"
+else
+	echo "Unable to identify cpu architecture for mirrorlist url."
+	exit;
+fi
+
+cp /etc/pacman.d/mirrorlist /etc/pacman.d/mirrorlist.rank
+curl -s ${mirrorlist_url} -o /root/mirrorlist.new
+sed -e 's/^#Server/Server/' -e '/^#/d' -i /root/mirrorlist.new
+rm /etc/pacman.d/mirrorlist
+rankmirrors -n 5 /root/mirrorlist.new > /etc/pacman.d/mirrorlist
+pacman -Syy
+
+# Wipes the selected disk and sets up the 4 partitions
+sgdisk -og $ai_device
+sgdisk -n 1:2048:4095 -c 1:"BIOS Boot Partition" -t 1:ef02 $ai_device
+sgdisk -n 2:4096:2101247 -c 2:"EFI System Partition" -t 2:ef00 $ai_device
+sgdisk -n 3:2101248:6295551 -c 3:"Linux /boot" -t 3:8300 $ai_device
+ENDSECTOR=`sgdisk -E $ai_device`
+sgdisk -n 4:6295552:$ENDSECTOR -c 4:"Linux LVM" -t 4:8e00 $ai_device
+sgdisk -p $ai_device
+sleep 5
+
+# Setup LVM volumes
+pvcreate ${ai_device}${ai_partIdent}4
+vgcreate vol ${ai_device}${ai_partIdent}4
+lvcreate -L 1G vol -n swap
+lvcreate -1 100%FREE vol -n root
+
+# Format file systems
+mkfs.fat -F32 ${ai_device}${ai_partIdent}2
+mkfs.ext4 -F ${ai_device}${ai_partIdent}3
+mkfs.ext4 -F /dev/mapper/vol-root
+mkswap /dev/mapper/vol-swap
 
