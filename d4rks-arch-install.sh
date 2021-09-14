@@ -90,11 +90,28 @@ sleep 5
 pvcreate ${ai_device}${ai_partIdent}4
 vgcreate vol ${ai_device}${ai_partIdent}4
 lvcreate -L 1G vol -n swap
-lvcreate -1 100%FREE vol -n root
+lvcreate -l 100%FREE vol -n root
 
 # Format file systems
 mkfs.fat -F32 ${ai_device}${ai_partIdent}2
 mkfs.ext4 -F ${ai_device}${ai_partIdent}3
 mkfs.ext4 -F /dev/mapper/vol-root
 mkswap /dev/mapper/vol-swap
+
+# Mount the filesystems
+mount /dev/mapper/vol-root /mnt
+mkdir /mnt/boot
+mount ${ai_device}${ai_partIdent}3 /mnt/boot
+mkdir /mnt/boot/efi
+mount ${ai_device}${ai_partIdent}2 /mnt/boot/efi
+swapon /dev/mapper/vol-swap
+
+pkgs=`tr '\n' ' ' < ./pacstrap-pkgs-initial.txt`
+pacstrap /mnt `echo $pkgs`
+
+cp /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/mirrorlist
+genfstab -U -p /mnt > /mnt/etc/fstab
+
+mkdir /mnt/hostrun
+mount --bind /run /mnt/hostrun
 
